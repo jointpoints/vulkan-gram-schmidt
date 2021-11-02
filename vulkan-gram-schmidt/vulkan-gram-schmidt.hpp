@@ -10,6 +10,8 @@
 
 
 #include <vulkan/vulkan.hpp>
+#include <vector>
+#include <map>
 
 
 
@@ -30,7 +32,15 @@ class GPUGramSchmidt final
 
 private:
 
-	VkInstance vk_instance;
+	VkInstance           vk_instance;
+	VkDevice             vk_device;
+	std::vector<VkQueue> vk_queues;
+
+	uint32_t vk_selected_gpu_i;
+	uint32_t vk_selected_queue_family_i;
+	uint32_t vk_selected_queues_count;
+
+	static std::map<std::pair<uint32_t, uint32_t>, uint32_t> vk_busy_queues;
 
 
 

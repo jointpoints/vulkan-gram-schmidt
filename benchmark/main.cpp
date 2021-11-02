@@ -15,6 +15,7 @@ int main(void)
 	try
 	{
 		GPUGramSchmidt vgs(true);
+		std::cout << "1\n";
 	}
 	catch (std::exception &error)
 	{
