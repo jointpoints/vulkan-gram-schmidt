@@ -12,6 +12,7 @@
 #include <vulkan/vulkan.hpp>
 #include <vector>
 #include <map>
+#include <mutex>
 
 
 
@@ -41,6 +42,8 @@ private:
 	uint32_t vk_selected_queues_count;
 
 	static std::map<std::pair<uint32_t, uint32_t>, uint32_t> vk_busy_queues;
+
+	static std::mutex constructor;
 
 
 

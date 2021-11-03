@@ -10,10 +10,21 @@
 
 
 
-#define VK_VALIDATE(func, error_message) try {VkResult vk_result = func; \
-                                              if (vk_result != VK_SUCCESS) \
-                                                  throw std::runtime_error(std::string("Execution of ") + #func + " has failed with exitcode " + std::to_string(vk_result) + " and the following message:\n\t" + error_message); \
-                                             } catch (...) {throw std::runtime_error(std::string("Execution of ") + #func + " has failed with exception and the following message:\n\t" + error_message);}
+#define VK_VALIDATE(func, error_message, unlock_constructor)                \
+	try                                                                     \
+	{                                                                       \
+		VkResult vk_result = func;                                          \
+		if (vk_result != VK_SUCCESS)                                        \
+		{                                                                   \
+			if (unlock_constructor) GPUGramSchmidt::constructor.unlock();   \
+			throw std::runtime_error(std::string("Execution of ") + #func + " has failed with exitcode " + std::to_string(vk_result) + " and the following message:\n\t" + error_message); \
+		}                                                                   \
+	}                                                                       \
+	catch (...)                                                             \
+	{                                                                       \
+		if (unlock_constructor) GPUGramSchmidt::constructor.unlock();       \
+		throw std::runtime_error(std::string("Execution of ") + #func + " has failed with exception and the following message:\n\t" + error_message); \
+	}
 
 
 
@@ -21,6 +32,7 @@
 
 // Initialisation of static members
 std::map<std::pair<uint32_t, uint32_t>, uint32_t> GPUGramSchmidt::vk_busy_queues;
+std::mutex GPUGramSchmidt::constructor;
 
 
 
@@ -28,8 +40,12 @@ std::map<std::pair<uint32_t, uint32_t>, uint32_t> GPUGramSchmidt::vk_busy_queues
 
 GPUGramSchmidt::GPUGramSchmidt(bool const enable_debug)
 {
-	// 1. Create Vulkan Instance
-	//   1.1. Define necessary metadata for Vulkan Instance
+	// 1. Lock the constructor mutex so that no two GPUGramSchmidt objects are constructed at the
+	//    same time.
+	GPUGramSchmidt::constructor.lock();
+
+	// 2. Create Vulkan Instance
+	//   2.1. Define necessary metadata for Vulkan Instance
 	uint32_t const    vk_api_req_version        = VK_MAKE_API_VERSION(0, 1, 2, 0);
 	uint32_t const    vk_debug_layers_count     = 1;
 	char const *const vk_debug_layers[]         = {"VK_LAYER_KHRONOS_validation"};
@@ -56,16 +72,16 @@ GPUGramSchmidt::GPUGramSchmidt(bool const enable_debug)
 		.enabledExtensionCount   = (enable_debug) ? (vk_debug_extensions_count) : (0U),
 		.ppEnabledExtensionNames = (enable_debug) ? (vk_debug_extensions) : (nullptr)
 	};
-	//   1.2. Check current version of Vulkan Instance before creation of instance
-	//     1.2.1. If vkEnumerateInstanceVersion is not available, this is Vulkan 1.0
+	//   2.2. Check current version of Vulkan Instance before creation of instance
+	//     2.2.1. If vkEnumerateInstanceVersion is not available, this is Vulkan 1.0
 	if (vkGetInstanceProcAddr(nullptr, "vkEnumerateInstanceVersion") == nullptr)
 		throw std::runtime_error("Vulkan 1.2 is not supported by this machine.");
-	//     1.2.2. If vkEnumerateInstanceVersion is available, we may call it and check the version
+	//     2.2.2. If vkEnumerateInstanceVersion is available, we may call it and check the version
 	uint32_t vk_api_version = 0;
-	VK_VALIDATE(  vkEnumerateInstanceVersion(&vk_api_version), "Unable to identify available Vulkan version."  );
+	VK_VALIDATE(  vkEnumerateInstanceVersion(&vk_api_version), "Unable to identify available Vulkan version.", true  );
 	if (vk_api_version < vk_api_req_version)
 		throw std::runtime_error("Vulkan 1.2 is not supported by this machine.");
-	//   1.3. If debugging is required, check availability of debug layers
+	//   2.3. If debugging is required, check availability of debug layers
 	if (enable_debug)
 	{
 		uint32_t vk_layers_count = 0;
@@ -85,16 +101,16 @@ GPUGramSchmidt::GPUGramSchmidt(bool const enable_debug)
 				throw std::runtime_error(std::string("Debug layer ") + vk_debug_layer + " was not found. Debugging impossible.");
 		}
 	}
-	//   1.4. If all explicit checks are passed, we may proceed to the creation of Instance itself
-	VK_VALIDATE(  vkCreateInstance(&vk_instance_info, nullptr, &this->vk_instance), "Vulkan Instance creation failed."  );
+	//   2.4. If all explicit checks are passed, we may proceed to the creation of Instance itself
+	VK_VALIDATE(  vkCreateInstance(&vk_instance_info, nullptr, &this->vk_instance), "Vulkan Instance creation failed.", true  );
 
-	// 2. Find suitable physical device
-	//   2.1. Enumerate all physical devices (GPUs) available to the Vulkan Instance
+	// 3. Find suitable physical device
+	//   3.1. Enumerate all physical devices (GPUs) available to the Vulkan Instance
 	uint32_t vk_gpus_count = 0;
-	VK_VALIDATE(  vkEnumeratePhysicalDevices(this->vk_instance, &vk_gpus_count, nullptr), "Physical device enumeration failed."  );
+	VK_VALIDATE(  vkEnumeratePhysicalDevices(this->vk_instance, &vk_gpus_count, nullptr), "Physical device enumeration failed.", true  );
 	VkPhysicalDevice vk_gpus[vk_gpus_count];
-	VK_VALIDATE(  vkEnumeratePhysicalDevices(this->vk_instance, &vk_gpus_count, vk_gpus), "Physical device enumeration failed."  );
-	//   2.2. Analyse queues of each GPU. We're looking for queues that can exclusively do
+	VK_VALIDATE(  vkEnumeratePhysicalDevices(this->vk_instance, &vk_gpus_count, vk_gpus), "Physical device enumeration failed.", true  );
+	//   3.2. Analyse queues of each GPU. We're looking for queues that can exclusively do
 	//        computations. If we can't find such queues, we select queues that can at least do
 	//        computations.
 	std::vector<VkQueueFamilyProperties> vk_queue_properties[vk_gpus_count];
@@ -102,12 +118,12 @@ GPUGramSchmidt::GPUGramSchmidt(bool const enable_debug)
 	this->vk_selected_queue_family_i = 0U - 1;
 	for (uint32_t gpu_i = 0; gpu_i < vk_gpus_count; ++gpu_i)
 	{
-		//     2.2.1. For each GPU get information about its queue families
+		//     3.2.1. For each GPU get information about its queue families
 		uint32_t vk_queue_families_count = 0;
 		vkGetPhysicalDeviceQueueFamilyProperties(vk_gpus[gpu_i], &vk_queue_families_count, nullptr);
 		vk_queue_properties[gpu_i].resize(vk_queue_families_count);
 		vkGetPhysicalDeviceQueueFamilyProperties(vk_gpus[gpu_i], &vk_queue_families_count, vk_queue_properties[gpu_i].data());
-		//     2.2.2. Check these properties
+		//     3.2.2. Check these properties
 		for (uint32_t queue_family_i = 0; queue_family_i < vk_queue_families_count; ++queue_family_i)
 			if (vk_queue_properties[gpu_i][queue_family_i].queueFlags & VK_QUEUE_COMPUTE_BIT != 0)
 				if (GPUGramSchmidt::vk_busy_queues[std::make_pair(gpu_i, queue_family_i)] < vk_queue_properties[gpu_i][queue_family_i].queueCount)
@@ -117,7 +133,7 @@ GPUGramSchmidt::GPUGramSchmidt(bool const enable_debug)
 					if (vk_queue_properties[gpu_i][queue_family_i].queueFlags & VK_QUEUE_GRAPHICS_BIT == 0)
 						break;
 				}
-		//     2.2.3. If suitable queue family was found, remember this by marking them as occupied
+		//     3.2.3. If suitable queue family was found, remember this by marking them as occupied
 		if (vk_selected_gpu_i != 0U - 1)
 		{
 			this->vk_selected_queues_count = vk_queue_properties[this->vk_selected_gpu_i][this->vk_selected_queue_family_i].queueCount;
@@ -127,7 +143,7 @@ GPUGramSchmidt::GPUGramSchmidt(bool const enable_debug)
 			throw std::runtime_error("This computer does not support GPU calculations or all available queues are occupied.");
 	}
 
-	// 3. Create Vulkan Device for selected GPU
+	// 4. Create Vulkan Device for selected GPU
 	std::vector<float> const vk_queue_priorities(this->vk_selected_queues_count, 1.F);
 	VkDeviceQueueCreateInfo vk_device_queue_info =
 	{
@@ -151,12 +167,15 @@ GPUGramSchmidt::GPUGramSchmidt(bool const enable_debug)
 		.ppEnabledExtensionNames = nullptr,
 		.pEnabledFeatures        = nullptr
 	};
-	VK_VALIDATE(  vkCreateDevice(vk_gpus[this->vk_selected_gpu_i], &vk_device_info, nullptr, &this->vk_device), "Logical device creation failed."  );
+	VK_VALIDATE(  vkCreateDevice(vk_gpus[this->vk_selected_gpu_i], &vk_device_info, nullptr, &this->vk_device), "Logical device creation failed.", true  );
 
-	// 4. Get Vulkan Queues associated with this Vulkan Device
+	// 5. Get Vulkan Queues associated with this Vulkan Device
 	this->vk_queues.resize(this->vk_selected_queues_count);
 	for (uint32_t queue_i = 0; queue_i < this->vk_selected_queues_count; ++queue_i)
 		vkGetDeviceQueue(this->vk_device, this->vk_selected_queue_family_i, queue_i, this->vk_queues.data() + queue_i);
+	
+	// 6. Unlock constructor mutex
+	GPUGramSchmidt::constructor.unlock();
 }
 
 
@@ -165,7 +184,7 @@ GPUGramSchmidt::GPUGramSchmidt(bool const enable_debug)
 
 GPUGramSchmidt::~GPUGramSchmidt(void)
 {
-	GPUGramSchmidt::vk_busy_queues.erase(GPUGramSchmidt::vk_busy_queues.find(std::make_pair(this->vk_selected_gpu_i, this->vk_selected_queue_family_i)));
+	GPUGramSchmidt::vk_busy_queues[std::make_pair(this->vk_selected_gpu_i, this->vk_selected_queue_family_i)] -= this->vk_selected_queues_count;
 	vkDestroyDevice(this->vk_device, nullptr);
 	vkDestroyInstance(this->vk_instance, nullptr);
 }
