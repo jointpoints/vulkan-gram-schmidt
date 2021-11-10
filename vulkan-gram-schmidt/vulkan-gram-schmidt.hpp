@@ -36,6 +36,7 @@ private:
 	VkInstance           vk_instance;
 	VkDevice             vk_device;
 	std::vector<VkQueue> vk_queues;
+	VkCommandPool        vk_command_pool;
 
 	uint32_t vk_selected_gpu_i;
 	uint32_t vk_selected_queue_family_i;
@@ -49,6 +50,9 @@ private:
 
 public:
 
+	/// @name Constructors & destructors
+	/// @{
+
 	/**
 	 * @brief Creates new wrapper interface
 	 *
@@ -57,6 +61,17 @@ public:
 	GPUGramSchmidt(bool const enable_debug = false);
 
 	~GPUGramSchmidt(void);
+
+	/// @}
+
+
+
+	/// @name Computations
+	/// @{
+	
+	double run(void);
+
+	/// @}
 
 
 

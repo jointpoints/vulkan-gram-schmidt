@@ -38,6 +38,12 @@ std::mutex GPUGramSchmidt::constructor;
 
 
 
+// Constructors & destructors
+
+
+
+
+
 GPUGramSchmidt::GPUGramSchmidt(bool const enable_debug)
 {
 	// 1. Lock the constructor mutex so that no two GPUGramSchmidt objects are constructed at the
@@ -174,7 +180,17 @@ GPUGramSchmidt::GPUGramSchmidt(bool const enable_debug)
 	for (uint32_t queue_i = 0; queue_i < this->vk_selected_queues_count; ++queue_i)
 		vkGetDeviceQueue(this->vk_device, this->vk_selected_queue_family_i, queue_i, this->vk_queues.data() + queue_i);
 	
-	// 6. Unlock constructor mutex
+	// 6. Create command pool from where buffers will be allocated
+	VkCommandPoolCreateInfo const vk_command_pool_info =
+	{
+		.sType            = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
+		.pNext            = nullptr,
+		.flags            = 0,
+		.queueFamilyIndex = this->vk_selected_queue_family_i
+	};
+	VK_VALIDATE(  vkCreateCommandPool(this->vk_device, &vk_command_pool_info, nullptr, &this->vk_command_pool), "Command pool creation failed.", true  );
+	
+	// 7. Unlock constructor mutex
 	GPUGramSchmidt::constructor.unlock();
 }
 
@@ -185,6 +201,36 @@ GPUGramSchmidt::GPUGramSchmidt(bool const enable_debug)
 GPUGramSchmidt::~GPUGramSchmidt(void)
 {
 	GPUGramSchmidt::vk_busy_queues[std::make_pair(this->vk_selected_gpu_i, this->vk_selected_queue_family_i)] -= this->vk_selected_queues_count;
+	vkDestroyCommandPool(this->vk_device, this->vk_command_pool, nullptr);
 	vkDestroyDevice(this->vk_device, nullptr);
 	vkDestroyInstance(this->vk_instance, nullptr);
+}
+
+
+
+
+
+// Computations
+
+
+
+
+
+double GPUGramSchmidt::run(void)
+{
+	// 1. Create command buffer
+	VkCommandBuffer vk_command_buffer;
+	VkCommandBufferAllocateInfo const vk_command_buffer_info =
+	{
+		.sType              = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
+		.pNext              = nullptr,
+		.commandPool        = this->vk_command_pool,
+		.level              = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
+		.commandBufferCount = 1
+	};
+	VK_VALIDATE(  vkAllocateCommandBuffers(this->vk_device, &vk_command_buffer_info, &vk_command_buffer), "Command buffer was not allocated.", false  );
+	
+	vkFreeCommandBuffers(this->vk_device, this->vk_command_pool, 1, &vk_command_buffer);
+	
+	return 1.0;
 }
