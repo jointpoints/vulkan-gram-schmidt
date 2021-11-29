@@ -185,7 +185,7 @@ GPUGramSchmidt::GPUGramSchmidt(bool const enable_debug)
 	{
 		.sType            = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
 		.pNext            = nullptr,
-		.flags            = 0,
+		.flags            = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT,
 		.queueFamilyIndex = this->vk_selected_queue_family_i
 	};
 	VK_VALIDATE(  vkCreateCommandPool(this->vk_device, &vk_command_pool_info, nullptr, &this->vk_command_pool), "Command pool creation failed.", true  );
@@ -218,7 +218,10 @@ GPUGramSchmidt::~GPUGramSchmidt(void)
 
 double GPUGramSchmidt::run(void)
 {
-	// 1. Create command buffer
+	// ??. Create compute pipeline
+	
+
+	// ??. Create command buffer
 	VkCommandBuffer vk_command_buffer;
 	VkCommandBufferAllocateInfo const vk_command_buffer_info =
 	{

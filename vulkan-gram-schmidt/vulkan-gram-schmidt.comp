@@ -1,0 +1,53 @@
+/**
+ * @file vulkan-gram-schmidt.glsl
+ * @author JointPoints, 2021, github.com/jointpoints
+ */
+#version 460
+
+
+
+#define VECTOR_INDEX(x) x * dim
+
+
+
+layout(local_size_x = 32, local_size_y = 1, local_size_z = 1) in; // 1024 invocations within a work group are guaranteed
+
+layout(set = 0, binding = 0) buffer MatrixBuffer
+{
+	double data[];
+}
+matrix;
+
+layout(push_constant) uniform metadata
+{
+	uint dim;
+	uint vector_count;
+	uint start_vec_i;
+};
+
+
+
+
+
+void main(void)
+{
+	uint curr_vec_i = gl_GlobalInvocationID.x;
+
+	if ((curr_vec_i < start_vec_i) || (curr_vec_i >= vector_count))
+		return;
+
+	double dot_product = 0.0;
+	for (uint dim_i = 0; dim_i < dim; ++dim_i)
+		dot_product += matrix.data[VECTOR_INDEX(start_vec_i) + dim_i] * matrix.data[VECTOR_INDEX(curr_vec_i) + dim_i];
+	
+	for (uint dim_i = 0; dim_i < dim; ++dim_i)
+		matrix.data[VECTOR_INDEX(curr_vec_i) + dim_i] -= dot_product * matrix.data[VECTOR_INDEX(start_vec_i) + dim_i];
+
+	return;
+}
+
+
+
+
+
+#undef VECTOR_INDEX
