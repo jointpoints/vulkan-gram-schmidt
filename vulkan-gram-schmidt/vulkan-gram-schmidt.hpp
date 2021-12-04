@@ -50,6 +50,16 @@ private:
 
 public:
 
+	/// @name Static parameters
+	/// @{
+	
+	/**
+	 * Path to a folder containing "vulkan-gram-schmidt.spv"
+	 */
+	static std::string shader_folder;
+
+	/// @}
+
 	/// @name Constructors & destructors
 	/// @{
 

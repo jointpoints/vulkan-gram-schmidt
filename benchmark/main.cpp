@@ -14,6 +14,7 @@ int main(void)
 {
 	try
 	{
+		GPUGramSchmidt::shader_folder = "../vulkan-gram-schmidt";
 		GPUGramSchmidt vgs(true);
 		std::cout << vgs.run() << "\n";
 	}

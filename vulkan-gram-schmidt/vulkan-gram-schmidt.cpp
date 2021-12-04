@@ -5,6 +5,7 @@
 #include "vulkan-gram-schmidt.hpp"
 #include <exception>
 #include <cstdlib>
+#include <fstream>
 
 
 
@@ -33,6 +34,7 @@
 // Initialisation of static members
 std::map<std::pair<uint32_t, uint32_t>, uint32_t> GPUGramSchmidt::vk_busy_queues;
 std::mutex GPUGramSchmidt::constructor;
+std::string GPUGramSchmidt::shader_folder = ".";
 
 
 
@@ -218,8 +220,59 @@ GPUGramSchmidt::~GPUGramSchmidt(void)
 
 double GPUGramSchmidt::run(void)
 {
+	// ??. Load the precompiled compute shader
+	//   ??.1. Open the file and fetch the bytes 
+	std::fstream compute_shader_loader(GPUGramSchmidt::shader_folder + "/vulkan-gram-schmidt.spv", std::ios_base::binary | std::ios_base::in | std::ios_base::ate);
+	if (compute_shader_loader.fail())
+		throw std::runtime_error("File '" + GPUGramSchmidt::shader_folder + "/vulkan-gram-schmidt.spv' was not found.");
+	//compute_shader_loader.seekg(0, compute_shader_loader.end);
+	size_t compute_shader_byte_count = compute_shader_loader.tellg();
+	compute_shader_loader.seekg(0, compute_shader_loader.beg);
+	std::vector<char> compute_shader_bytes(compute_shader_byte_count + (4 - compute_shader_byte_count % 4) % 4, 0);
+	compute_shader_loader.read(compute_shader_bytes.data(), compute_shader_byte_count);
+	compute_shader_loader.close();
+	//   ??.2. Make a shader module
+	VkShaderModule vk_compute_shader;
+	VkShaderModuleCreateInfo const vk_compute_shader_info =
+	{
+		.sType    = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
+		.pNext    = nullptr,
+		.flags    = 0, // reserved
+		.codeSize = compute_shader_bytes.size(),
+		.pCode    = reinterpret_cast<uint32_t const *>(compute_shader_bytes.data())
+	};
+	VK_VALIDATE(  vkCreateShaderModule(this->vk_device, &vk_compute_shader_info, nullptr, &vk_compute_shader), "Compute shader module creation failed.", false  );
+
+	// ??. Specify layout for the compute pipeline
+	/*VkPipelineLayout vk_compute_pipeline_layout;
+	VkPipelineLayoutCreateInfo const vk_compute_pipeline_layout_info =
+	{
+		.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
+		.pNext = nullptr,
+		.flags = 0, // reserved
+		.setLayoutCount = 1,
+		.pSetLayouts =
+	};*/
+
 	// ??. Create compute pipeline
-	
+	VkPipelineShaderStageCreateInfo const vk_shader_stage_info =
+	{
+		.sType               = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+		.pNext               = nullptr,
+		.flags               = 0,
+		.stage               = VK_SHADER_STAGE_COMPUTE_BIT,
+		.module              = vk_compute_shader,
+		.pName               = "main",
+		.pSpecializationInfo = nullptr
+	};
+	VkComputePipelineCreateInfo const vk_compute_pipeline_info =
+	{
+		.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO,
+		.pNext = nullptr,
+		.flags = 0, // VK_PIPELINE_CREATE_ALLOW_DERIVATIVES_BIT,
+		.stage = vk_shader_stage_info,
+		//.layout =
+	};
 
 	// ??. Create command buffer
 	VkCommandBuffer vk_command_buffer;
@@ -234,6 +287,7 @@ double GPUGramSchmidt::run(void)
 	VK_VALIDATE(  vkAllocateCommandBuffers(this->vk_device, &vk_command_buffer_info, &vk_command_buffer), "Command buffer was not allocated.", false  );
 	
 	vkFreeCommandBuffers(this->vk_device, this->vk_command_pool, 1, &vk_command_buffer);
+	vkDestroyShaderModule(this->vk_device, vk_compute_shader, nullptr);
 	
 	return 1.0;
 }
