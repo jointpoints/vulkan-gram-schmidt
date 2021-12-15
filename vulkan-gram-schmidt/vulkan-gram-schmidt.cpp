@@ -126,12 +126,17 @@ GPUGramSchmidt::GPUGramSchmidt(bool const enable_debug)
 	this->vk_selected_queue_family_i = 0U - 1;
 	for (uint32_t gpu_i = 0; gpu_i < vk_gpus_count; ++gpu_i)
 	{
-		//     3.2.1. For each GPU get information about its queue families
+		//     3.2.1. Check GPU features to certify that it supports double precision calculations
+		VkPhysicalDeviceFeatures vk_gpu_features;
+		vkGetPhysicalDeviceFeatures(vk_gpus[gpu_i], &vk_gpu_features);
+		if (vk_gpu_features.shaderFloat64 == false)
+			continue;
+		//     3.2.2. For each GPU get information about its queue families
 		uint32_t vk_queue_families_count = 0;
 		vkGetPhysicalDeviceQueueFamilyProperties(vk_gpus[gpu_i], &vk_queue_families_count, nullptr);
 		vk_queue_properties[gpu_i].resize(vk_queue_families_count);
 		vkGetPhysicalDeviceQueueFamilyProperties(vk_gpus[gpu_i], &vk_queue_families_count, vk_queue_properties[gpu_i].data());
-		//     3.2.2. Check these properties
+		//     3.2.3. Check these properties
 		for (uint32_t queue_family_i = 0; queue_family_i < vk_queue_families_count; ++queue_family_i)
 			if (vk_queue_properties[gpu_i][queue_family_i].queueFlags & VK_QUEUE_COMPUTE_BIT != 0)
 				if (GPUGramSchmidt::vk_busy_queues[std::make_pair(gpu_i, queue_family_i)] < vk_queue_properties[gpu_i][queue_family_i].queueCount)
@@ -141,15 +146,16 @@ GPUGramSchmidt::GPUGramSchmidt(bool const enable_debug)
 					if (vk_queue_properties[gpu_i][queue_family_i].queueFlags & VK_QUEUE_GRAPHICS_BIT == 0)
 						break;
 				}
-		//     3.2.3. If suitable queue family was found, remember this by marking them as occupied
+		//     3.2.4. If suitable queue family was found, remember this by marking them as occupied
 		if (vk_selected_gpu_i != 0U - 1)
 		{
 			this->vk_selected_queues_count = vk_queue_properties[this->vk_selected_gpu_i][this->vk_selected_queue_family_i].queueCount;
 			GPUGramSchmidt::vk_busy_queues[std::make_pair(this->vk_selected_gpu_i, this->vk_selected_queue_family_i)] += this->vk_selected_queues_count;
+			break;
 		}
-		else
-			throw std::runtime_error("This computer does not support GPU calculations or all available queues are occupied.");
 	}
+	if (this->vk_selected_gpu_i == 0U - 1)
+		throw std::runtime_error("This computer does not support GPU calculations or all available queues are occupied.");
 
 	// 4. Create Vulkan Device for selected GPU
 	std::vector<float> const vk_queue_priorities(this->vk_selected_queues_count, 1.F);
@@ -243,18 +249,50 @@ double GPUGramSchmidt::run(void)
 	};
 	VK_VALIDATE(  vkCreateShaderModule(this->vk_device, &vk_compute_shader_info, nullptr, &vk_compute_shader), "Compute shader module creation failed.", false  );
 
-	// ??. Specify layout for the compute pipeline
-	/*VkPipelineLayout vk_compute_pipeline_layout;
+	// ??. Prepare data for computations
+	//   ??.??. Describe the binding for the matrix (descriptor set 0, binding 0)
+	VkDescriptorSetLayoutBinding const vk_descriptor_set_0_binding_0 =
+	{
+		.binding            = 0,
+		.descriptorType     = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+		.descriptorCount    = 1,
+		.stageFlags         = VK_SHADER_STAGE_COMPUTE_BIT,
+		.pImmutableSamplers = nullptr
+	};
+	//   ??.??. Create descriptor set layout
+	VkDescriptorSetLayout vk_descriptor_set_0;
+	VkDescriptorSetLayoutCreateInfo const vk_descriptor_set_0_info =
+	{
+		.sType        = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+		.pNext        = nullptr,
+		.flags        = 0,
+		.bindingCount = 1,
+		.pBindings    = &vk_descriptor_set_0_binding_0
+	};
+	VK_VALIDATE(  vkCreateDescriptorSetLayout(this->vk_device, &vk_descriptor_set_0_info, nullptr, &vk_descriptor_set_0), "Descriptor set 0 layout creation failed.", false  );
+	//   ??.??. Describe push constants ranges (dim, vector_count, start_dim_i)
+	VkPushConstantRange const vk_push_constant_range =
+	{
+		.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT,
+		.offset     = 0,
+		.size       = 4 * 3
+	};
+	//   ??.??. Specify layout for the compute pipeline
+	VkPipelineLayout vk_compute_pipeline_layout;
 	VkPipelineLayoutCreateInfo const vk_compute_pipeline_layout_info =
 	{
-		.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
-		.pNext = nullptr,
-		.flags = 0, // reserved
-		.setLayoutCount = 1,
-		.pSetLayouts =
-	};*/
+		.sType                  = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
+		.pNext                  = nullptr,
+		.flags                  = 0, // reserved
+		.setLayoutCount         = 1,
+		.pSetLayouts            = &vk_descriptor_set_0,
+		.pushConstantRangeCount = 1,
+		.pPushConstantRanges    = &vk_push_constant_range
+	};
+	VK_VALIDATE(  vkCreatePipelineLayout(this->vk_device, &vk_compute_pipeline_layout_info, nullptr, &vk_compute_pipeline_layout), "Compute pipeline layout creation failed.", false  );
 
 	// ??. Create compute pipeline
+	VkPipeline vk_compute_pipeline;
 	VkPipelineShaderStageCreateInfo const vk_shader_stage_info =
 	{
 		.sType               = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
@@ -267,12 +305,15 @@ double GPUGramSchmidt::run(void)
 	};
 	VkComputePipelineCreateInfo const vk_compute_pipeline_info =
 	{
-		.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO,
-		.pNext = nullptr,
-		.flags = 0, // VK_PIPELINE_CREATE_ALLOW_DERIVATIVES_BIT,
-		.stage = vk_shader_stage_info,
-		//.layout =
+		.sType              = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO,
+		.pNext              = nullptr,
+		.flags              = 0, // VK_PIPELINE_CREATE_ALLOW_DERIVATIVES_BIT,
+		.stage              = vk_shader_stage_info,
+		.layout             = vk_compute_pipeline_layout,
+		.basePipelineHandle = VK_NULL_HANDLE,
+		.basePipelineIndex  = -1
 	};
+	VK_VALIDATE(  vkCreateComputePipelines(this->vk_device, VK_NULL_HANDLE, 1, &vk_compute_pipeline_info, nullptr, &vk_compute_pipeline), "Compute pipeline creation failed.", false  );
 
 	// ??. Create command buffer
 	VkCommandBuffer vk_command_buffer;
