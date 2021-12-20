@@ -124,10 +124,10 @@ GPUGramSchmidt::GPUGramSchmidt(bool const enable_debug)
 	std::vector<VkQueueFamilyProperties> vk_queue_properties[vk_gpus_count];
 	this->vk_selected_gpu_i          = 0U - 1;
 	this->vk_selected_queue_family_i = 0U - 1;
+	VkPhysicalDeviceFeatures vk_gpu_features;
 	for (uint32_t gpu_i = 0; gpu_i < vk_gpus_count; ++gpu_i)
 	{
 		//     3.2.1. Check GPU features to certify that it supports double precision calculations
-		VkPhysicalDeviceFeatures vk_gpu_features;
 		vkGetPhysicalDeviceFeatures(vk_gpus[gpu_i], &vk_gpu_features);
 		if (vk_gpu_features.shaderFloat64 == false)
 			continue;
@@ -149,7 +149,7 @@ GPUGramSchmidt::GPUGramSchmidt(bool const enable_debug)
 		//     3.2.4. If suitable queue family was found, remember this by marking them as occupied
 		if (vk_selected_gpu_i != 0U - 1)
 		{
-			this->vk_selected_queues_count = vk_queue_properties[this->vk_selected_gpu_i][this->vk_selected_queue_family_i].queueCount;
+			this->vk_selected_queues_count = 1; // vk_queue_properties[this->vk_selected_gpu_i][this->vk_selected_queue_family_i].queueCount;
 			GPUGramSchmidt::vk_busy_queues[std::make_pair(this->vk_selected_gpu_i, this->vk_selected_queue_family_i)] += this->vk_selected_queues_count;
 			break;
 		}
@@ -179,7 +179,7 @@ GPUGramSchmidt::GPUGramSchmidt(bool const enable_debug)
 		.ppEnabledLayerNames     = nullptr, // deprecated
 		.enabledExtensionCount   = 0,
 		.ppEnabledExtensionNames = nullptr,
-		.pEnabledFeatures        = nullptr
+		.pEnabledFeatures        = &vk_gpu_features // nullptr
 	};
 	VK_VALIDATE(  vkCreateDevice(vk_gpus[this->vk_selected_gpu_i], &vk_device_info, nullptr, &this->vk_device), "Logical device creation failed.", true  );
 
@@ -328,6 +328,9 @@ double GPUGramSchmidt::run(void)
 	VK_VALIDATE(  vkAllocateCommandBuffers(this->vk_device, &vk_command_buffer_info, &vk_command_buffer), "Command buffer was not allocated.", false  );
 	
 	vkFreeCommandBuffers(this->vk_device, this->vk_command_pool, 1, &vk_command_buffer);
+	vkDestroyPipeline(this->vk_device, vk_compute_pipeline, nullptr);
+	vkDestroyPipelineLayout(this->vk_device, vk_compute_pipeline_layout, nullptr);
+	vkDestroyDescriptorSetLayout(this->vk_device, vk_descriptor_set_0, nullptr);
 	vkDestroyShaderModule(this->vk_device, vk_compute_shader, nullptr);
 	
 	return 1.0;
