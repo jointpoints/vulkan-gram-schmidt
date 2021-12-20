@@ -16,7 +16,8 @@ int main(void)
 	{
 		GPUGramSchmidt::shader_folder = "../vulkan-gram-schmidt";
 		GPUGramSchmidt vgs(true);
-		std::cout << vgs.run() << "\n";
+		GPUGramSchmidt::Matrix matrix{{1, 2}, {3, 4}};
+		std::cout << vgs.run(matrix) << "\n";
 	}
 	catch (std::exception &error)
 	{

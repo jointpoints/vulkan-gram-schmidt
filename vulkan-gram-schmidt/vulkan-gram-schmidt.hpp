@@ -33,10 +33,16 @@ class GPUGramSchmidt final
 
 private:
 
-	VkInstance           vk_instance;
-	VkDevice             vk_device;
-	std::vector<VkQueue> vk_queues;
-	VkCommandPool        vk_command_pool;
+	VkInstance            vk_instance;
+	VkPhysicalDevice      vk_physical_device;
+	VkDevice              vk_device;
+	std::vector<VkQueue>  vk_queues;
+	VkShaderModule        vk_compute_shader;
+	VkDescriptorSetLayout vk_descriptor_set_0_layout;
+	VkPipelineLayout      vk_compute_pipeline_layout;
+	VkPipeline            vk_compute_pipeline;
+	VkCommandPool         vk_command_pool;
+	VkCommandBuffer       vk_command_buffer;
 
 	uint32_t vk_selected_gpu_i;
 	uint32_t vk_selected_queue_family_i;
@@ -49,6 +55,8 @@ private:
 
 
 public:
+
+	using Matrix = std::vector<std::vector<double>>;
 
 	/// @name Static parameters
 	/// @{
@@ -79,7 +87,7 @@ public:
 	/// @name Computations
 	/// @{
 	
-	double run(void);
+	double run(GPUGramSchmidt::Matrix &matrix);
 
 	/// @}
 

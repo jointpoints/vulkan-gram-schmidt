@@ -181,14 +181,100 @@ GPUGramSchmidt::GPUGramSchmidt(bool const enable_debug)
 		.ppEnabledExtensionNames = nullptr,
 		.pEnabledFeatures        = &vk_gpu_features // nullptr
 	};
-	VK_VALIDATE(  vkCreateDevice(vk_gpus[this->vk_selected_gpu_i], &vk_device_info, nullptr, &this->vk_device), "Logical device creation failed.", true  );
+	this->vk_physical_device = vk_gpus[this->vk_selected_gpu_i];
+	VK_VALIDATE(  vkCreateDevice(this->vk_physical_device, &vk_device_info, nullptr, &this->vk_device), "Logical device creation failed.", true  );
 
 	// 5. Get Vulkan Queues associated with this Vulkan Device
 	this->vk_queues.resize(this->vk_selected_queues_count);
 	for (uint32_t queue_i = 0; queue_i < this->vk_selected_queues_count; ++queue_i)
 		vkGetDeviceQueue(this->vk_device, this->vk_selected_queue_family_i, queue_i, this->vk_queues.data() + queue_i);
 	
-	// 6. Create command pool from where buffers will be allocated
+	// ??. Load the precompiled compute shader
+	//   ??.1. Open the file and fetch the bytes 
+	std::fstream compute_shader_loader(GPUGramSchmidt::shader_folder + "/vulkan-gram-schmidt.spv", std::ios_base::binary | std::ios_base::in | std::ios_base::ate);
+	if (compute_shader_loader.fail())
+		throw std::runtime_error("File '" + GPUGramSchmidt::shader_folder + "/vulkan-gram-schmidt.spv' was not found.");
+	//compute_shader_loader.seekg(0, compute_shader_loader.end);
+	size_t compute_shader_byte_count = compute_shader_loader.tellg();
+	compute_shader_loader.seekg(0, compute_shader_loader.beg);
+	std::vector<char> compute_shader_bytes(compute_shader_byte_count + (4 - compute_shader_byte_count % 4) % 4, 0);
+	compute_shader_loader.read(compute_shader_bytes.data(), compute_shader_byte_count);
+	compute_shader_loader.close();
+	//   ??.2. Make a shader module
+	VkShaderModuleCreateInfo const vk_compute_shader_info =
+	{
+		.sType    = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
+		.pNext    = nullptr,
+		.flags    = 0, // reserved
+		.codeSize = compute_shader_bytes.size(),
+		.pCode    = reinterpret_cast<uint32_t const *>(compute_shader_bytes.data())
+	};
+	VK_VALIDATE(  vkCreateShaderModule(this->vk_device, &vk_compute_shader_info, nullptr, &this->vk_compute_shader), "Compute shader module creation failed.", true  );
+
+	// ??. Prepare metadata for computations
+	//   ??.??. Describe the binding for the matrix (descriptor set 0, binding 0)
+	VkDescriptorSetLayoutBinding const vk_descriptor_set_0_binding_0 =
+	{
+		.binding            = 0,
+		.descriptorType     = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+		.descriptorCount    = 1,
+		.stageFlags         = VK_SHADER_STAGE_COMPUTE_BIT,
+		.pImmutableSamplers = nullptr
+	};
+	//   ??.??. Create descriptor set layout
+	VkDescriptorSetLayoutCreateInfo const vk_descriptor_set_0_info =
+	{
+		.sType        = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+		.pNext        = nullptr,
+		.flags        = 0,
+		.bindingCount = 1,
+		.pBindings    = &vk_descriptor_set_0_binding_0
+	};
+	VK_VALIDATE(  vkCreateDescriptorSetLayout(this->vk_device, &vk_descriptor_set_0_info, nullptr, &this->vk_descriptor_set_0_layout), "Descriptor set 0 layout creation failed.", true  );
+	//   ??.??. Describe push constants ranges (dim, vector_count, start_dim_i)
+	VkPushConstantRange const vk_push_constant_range =
+	{
+		.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT,
+		.offset     = 0,
+		.size       = 4 * 3
+	};
+	//   ??.??. Specify layout for the compute pipeline
+	VkPipelineLayoutCreateInfo const vk_compute_pipeline_layout_info =
+	{
+		.sType                  = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
+		.pNext                  = nullptr,
+		.flags                  = 0, // reserved
+		.setLayoutCount         = 1,
+		.pSetLayouts            = &this->vk_descriptor_set_0_layout,
+		.pushConstantRangeCount = 1,
+		.pPushConstantRanges    = &vk_push_constant_range
+	};
+	VK_VALIDATE(  vkCreatePipelineLayout(this->vk_device, &vk_compute_pipeline_layout_info, nullptr, &this->vk_compute_pipeline_layout), "Compute pipeline layout creation failed.", true  );
+
+	// ??. Create compute pipeline
+	VkPipelineShaderStageCreateInfo const vk_shader_stage_info =
+	{
+		.sType               = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+		.pNext               = nullptr,
+		.flags               = 0,
+		.stage               = VK_SHADER_STAGE_COMPUTE_BIT,
+		.module              = this->vk_compute_shader,
+		.pName               = "main",
+		.pSpecializationInfo = nullptr
+	};
+	VkComputePipelineCreateInfo const vk_compute_pipeline_info =
+	{
+		.sType              = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO,
+		.pNext              = nullptr,
+		.flags              = 0, // VK_PIPELINE_CREATE_ALLOW_DERIVATIVES_BIT,
+		.stage              = vk_shader_stage_info,
+		.layout             = this->vk_compute_pipeline_layout,
+		.basePipelineHandle = VK_NULL_HANDLE,
+		.basePipelineIndex  = -1
+	};
+	VK_VALIDATE(  vkCreateComputePipelines(this->vk_device, VK_NULL_HANDLE, 1, &vk_compute_pipeline_info, nullptr, &this->vk_compute_pipeline), "Compute pipeline creation failed.", true  );
+	
+	// ??. Create command pool from where buffers will be allocated
 	VkCommandPoolCreateInfo const vk_command_pool_info =
 	{
 		.sType            = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
@@ -197,8 +283,19 @@ GPUGramSchmidt::GPUGramSchmidt(bool const enable_debug)
 		.queueFamilyIndex = this->vk_selected_queue_family_i
 	};
 	VK_VALIDATE(  vkCreateCommandPool(this->vk_device, &vk_command_pool_info, nullptr, &this->vk_command_pool), "Command pool creation failed.", true  );
+
+	// ??. Create command buffer
+	VkCommandBufferAllocateInfo const vk_command_buffer_info =
+	{
+		.sType              = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
+		.pNext              = nullptr,
+		.commandPool        = this->vk_command_pool,
+		.level              = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
+		.commandBufferCount = 1
+	};
+	VK_VALIDATE(  vkAllocateCommandBuffers(this->vk_device, &vk_command_buffer_info, &this->vk_command_buffer), "Command buffer was not allocated.", true  );
 	
-	// 7. Unlock constructor mutex
+	// ??. Unlock constructor mutex
 	GPUGramSchmidt::constructor.unlock();
 }
 
@@ -209,7 +306,12 @@ GPUGramSchmidt::GPUGramSchmidt(bool const enable_debug)
 GPUGramSchmidt::~GPUGramSchmidt(void)
 {
 	GPUGramSchmidt::vk_busy_queues[std::make_pair(this->vk_selected_gpu_i, this->vk_selected_queue_family_i)] -= this->vk_selected_queues_count;
+	vkFreeCommandBuffers(this->vk_device, this->vk_command_pool, 1, &this->vk_command_buffer);
 	vkDestroyCommandPool(this->vk_device, this->vk_command_pool, nullptr);
+	vkDestroyPipeline(this->vk_device, this->vk_compute_pipeline, nullptr);
+	vkDestroyPipelineLayout(this->vk_device, this->vk_compute_pipeline_layout, nullptr);
+	vkDestroyDescriptorSetLayout(this->vk_device, this->vk_descriptor_set_0_layout, nullptr);
+	vkDestroyShaderModule(this->vk_device, this->vk_compute_shader, nullptr);
 	vkDestroyDevice(this->vk_device, nullptr);
 	vkDestroyInstance(this->vk_instance, nullptr);
 }
@@ -224,114 +326,31 @@ GPUGramSchmidt::~GPUGramSchmidt(void)
 
 
 
-double GPUGramSchmidt::run(void)
+double GPUGramSchmidt::run(GPUGramSchmidt::Matrix &matrix)
 {
-	// ??. Load the precompiled compute shader
-	//   ??.1. Open the file and fetch the bytes 
-	std::fstream compute_shader_loader(GPUGramSchmidt::shader_folder + "/vulkan-gram-schmidt.spv", std::ios_base::binary | std::ios_base::in | std::ios_base::ate);
-	if (compute_shader_loader.fail())
-		throw std::runtime_error("File '" + GPUGramSchmidt::shader_folder + "/vulkan-gram-schmidt.spv' was not found.");
-	//compute_shader_loader.seekg(0, compute_shader_loader.end);
-	size_t compute_shader_byte_count = compute_shader_loader.tellg();
-	compute_shader_loader.seekg(0, compute_shader_loader.beg);
-	std::vector<char> compute_shader_bytes(compute_shader_byte_count + (4 - compute_shader_byte_count % 4) % 4, 0);
-	compute_shader_loader.read(compute_shader_bytes.data(), compute_shader_byte_count);
-	compute_shader_loader.close();
-	//   ??.2. Make a shader module
-	VkShaderModule vk_compute_shader;
-	VkShaderModuleCreateInfo const vk_compute_shader_info =
+	// ??. Allocate device memory for computations
+	//   ??.1. Find a suitable memory type
+	VkPhysicalDeviceMemoryProperties vk_device_memory_properties;
+	vkGetPhysicalDeviceMemoryProperties(this->vk_physical_device, &vk_device_memory_properties);
+	//   ??.2. Try to find memory type with needed properties and enough free space
+	VkDeviceMemory vk_device_memory;
+	for (uint32_t memory_type_i = 0; memory_type_i < vk_device_memory_properties.memoryTypeCount; ++memory_type_i)
 	{
-		.sType    = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
-		.pNext    = nullptr,
-		.flags    = 0, // reserved
-		.codeSize = compute_shader_bytes.size(),
-		.pCode    = reinterpret_cast<uint32_t const *>(compute_shader_bytes.data())
-	};
-	VK_VALIDATE(  vkCreateShaderModule(this->vk_device, &vk_compute_shader_info, nullptr, &vk_compute_shader), "Compute shader module creation failed.", false  );
+		if ((vk_device_memory_properties.memoryTypes[memory_type_i].propertyFlags & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT == 0) ||
+		    (vk_device_memory_properties.memoryHeaps[vk_device_memory_properties.memoryTypes[memory_type_i].heapIndex].size < matrix.size() * matrix.size() * 8))
+			continue;
+		VkMemoryAllocateInfo const vk_memory_info =
+		{
+			.sType           = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
+			.pNext           = nullptr,
+			.allocationSize  = matrix.size() * matrix.size() * 8,
+			.memoryTypeIndex = memory_type_i
+		};
+		if (vkAllocateMemory(this->vk_device, &vk_memory_info, nullptr, &vk_device_memory) == VK_SUCCESS)
+			break;
+	}
 
-	// ??. Prepare data for computations
-	//   ??.??. Describe the binding for the matrix (descriptor set 0, binding 0)
-	VkDescriptorSetLayoutBinding const vk_descriptor_set_0_binding_0 =
-	{
-		.binding            = 0,
-		.descriptorType     = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-		.descriptorCount    = 1,
-		.stageFlags         = VK_SHADER_STAGE_COMPUTE_BIT,
-		.pImmutableSamplers = nullptr
-	};
-	//   ??.??. Create descriptor set layout
-	VkDescriptorSetLayout vk_descriptor_set_0;
-	VkDescriptorSetLayoutCreateInfo const vk_descriptor_set_0_info =
-	{
-		.sType        = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
-		.pNext        = nullptr,
-		.flags        = 0,
-		.bindingCount = 1,
-		.pBindings    = &vk_descriptor_set_0_binding_0
-	};
-	VK_VALIDATE(  vkCreateDescriptorSetLayout(this->vk_device, &vk_descriptor_set_0_info, nullptr, &vk_descriptor_set_0), "Descriptor set 0 layout creation failed.", false  );
-	//   ??.??. Describe push constants ranges (dim, vector_count, start_dim_i)
-	VkPushConstantRange const vk_push_constant_range =
-	{
-		.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT,
-		.offset     = 0,
-		.size       = 4 * 3
-	};
-	//   ??.??. Specify layout for the compute pipeline
-	VkPipelineLayout vk_compute_pipeline_layout;
-	VkPipelineLayoutCreateInfo const vk_compute_pipeline_layout_info =
-	{
-		.sType                  = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
-		.pNext                  = nullptr,
-		.flags                  = 0, // reserved
-		.setLayoutCount         = 1,
-		.pSetLayouts            = &vk_descriptor_set_0,
-		.pushConstantRangeCount = 1,
-		.pPushConstantRanges    = &vk_push_constant_range
-	};
-	VK_VALIDATE(  vkCreatePipelineLayout(this->vk_device, &vk_compute_pipeline_layout_info, nullptr, &vk_compute_pipeline_layout), "Compute pipeline layout creation failed.", false  );
-
-	// ??. Create compute pipeline
-	VkPipeline vk_compute_pipeline;
-	VkPipelineShaderStageCreateInfo const vk_shader_stage_info =
-	{
-		.sType               = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
-		.pNext               = nullptr,
-		.flags               = 0,
-		.stage               = VK_SHADER_STAGE_COMPUTE_BIT,
-		.module              = vk_compute_shader,
-		.pName               = "main",
-		.pSpecializationInfo = nullptr
-	};
-	VkComputePipelineCreateInfo const vk_compute_pipeline_info =
-	{
-		.sType              = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO,
-		.pNext              = nullptr,
-		.flags              = 0, // VK_PIPELINE_CREATE_ALLOW_DERIVATIVES_BIT,
-		.stage              = vk_shader_stage_info,
-		.layout             = vk_compute_pipeline_layout,
-		.basePipelineHandle = VK_NULL_HANDLE,
-		.basePipelineIndex  = -1
-	};
-	VK_VALIDATE(  vkCreateComputePipelines(this->vk_device, VK_NULL_HANDLE, 1, &vk_compute_pipeline_info, nullptr, &vk_compute_pipeline), "Compute pipeline creation failed.", false  );
-
-	// ??. Create command buffer
-	VkCommandBuffer vk_command_buffer;
-	VkCommandBufferAllocateInfo const vk_command_buffer_info =
-	{
-		.sType              = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
-		.pNext              = nullptr,
-		.commandPool        = this->vk_command_pool,
-		.level              = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
-		.commandBufferCount = 1
-	};
-	VK_VALIDATE(  vkAllocateCommandBuffers(this->vk_device, &vk_command_buffer_info, &vk_command_buffer), "Command buffer was not allocated.", false  );
-	
-	vkFreeCommandBuffers(this->vk_device, this->vk_command_pool, 1, &vk_command_buffer);
-	vkDestroyPipeline(this->vk_device, vk_compute_pipeline, nullptr);
-	vkDestroyPipelineLayout(this->vk_device, vk_compute_pipeline_layout, nullptr);
-	vkDestroyDescriptorSetLayout(this->vk_device, vk_descriptor_set_0, nullptr);
-	vkDestroyShaderModule(this->vk_device, vk_compute_shader, nullptr);
+	vkFreeMemory(this->vk_device, vk_device_memory, nullptr);
 	
 	return 1.0;
 }
