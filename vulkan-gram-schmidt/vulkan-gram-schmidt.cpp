@@ -189,8 +189,8 @@ GPUGramSchmidt::GPUGramSchmidt(bool const enable_debug)
 	for (uint32_t queue_i = 0; queue_i < this->vk_selected_queues_count; ++queue_i)
 		vkGetDeviceQueue(this->vk_device, this->vk_selected_queue_family_i, queue_i, this->vk_queues.data() + queue_i);
 	
-	// ??. Load the precompiled compute shader
-	//   ??.1. Open the file and fetch the bytes 
+	// 6. Load the precompiled compute shader
+	//   6.1. Open the file and fetch the bytes 
 	std::fstream compute_shader_loader(GPUGramSchmidt::shader_folder + "/vulkan-gram-schmidt.spv", std::ios_base::binary | std::ios_base::in | std::ios_base::ate);
 	if (compute_shader_loader.fail())
 		throw std::runtime_error("File '" + GPUGramSchmidt::shader_folder + "/vulkan-gram-schmidt.spv' was not found.");
@@ -200,7 +200,7 @@ GPUGramSchmidt::GPUGramSchmidt(bool const enable_debug)
 	std::vector<char> compute_shader_bytes(compute_shader_byte_count + (4 - compute_shader_byte_count % 4) % 4, 0);
 	compute_shader_loader.read(compute_shader_bytes.data(), compute_shader_byte_count);
 	compute_shader_loader.close();
-	//   ??.2. Make a shader module
+	//   6.2. Make a shader module
 	VkShaderModuleCreateInfo const vk_compute_shader_info =
 	{
 		.sType    = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
@@ -211,8 +211,8 @@ GPUGramSchmidt::GPUGramSchmidt(bool const enable_debug)
 	};
 	VK_VALIDATE(  vkCreateShaderModule(this->vk_device, &vk_compute_shader_info, nullptr, &this->vk_compute_shader), "Compute shader module creation failed.", true  );
 
-	// ??. Prepare metadata for computations
-	//   ??.??. Describe the binding for the matrix (descriptor set 0, binding 0)
+	// 7. Prepare metadata for computations
+	//   7.1. Describe the binding for the matrix (descriptor set 0, binding 0)
 	VkDescriptorSetLayoutBinding const vk_descriptor_set_0_binding_0 =
 	{
 		.binding            = 0,
@@ -221,7 +221,7 @@ GPUGramSchmidt::GPUGramSchmidt(bool const enable_debug)
 		.stageFlags         = VK_SHADER_STAGE_COMPUTE_BIT,
 		.pImmutableSamplers = nullptr
 	};
-	//   ??.??. Create descriptor set layout
+	//   7.2. Create descriptor set layout
 	VkDescriptorSetLayoutCreateInfo const vk_descriptor_set_0_info =
 	{
 		.sType        = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
@@ -231,14 +231,14 @@ GPUGramSchmidt::GPUGramSchmidt(bool const enable_debug)
 		.pBindings    = &vk_descriptor_set_0_binding_0
 	};
 	VK_VALIDATE(  vkCreateDescriptorSetLayout(this->vk_device, &vk_descriptor_set_0_info, nullptr, &this->vk_descriptor_set_0_layout), "Descriptor set 0 layout creation failed.", true  );
-	//   ??.??. Describe push constants ranges (dim, vector_count, start_dim_i)
+	//   7.3. Describe push constants ranges (dim, vector_count, start_dim_i)
 	VkPushConstantRange const vk_push_constant_range =
 	{
 		.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT,
 		.offset     = 0,
 		.size       = 4 * 3
 	};
-	//   ??.??. Specify layout for the compute pipeline
+	//   7.4. Specify layout for the compute pipeline
 	VkPipelineLayoutCreateInfo const vk_compute_pipeline_layout_info =
 	{
 		.sType                  = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
@@ -251,7 +251,7 @@ GPUGramSchmidt::GPUGramSchmidt(bool const enable_debug)
 	};
 	VK_VALIDATE(  vkCreatePipelineLayout(this->vk_device, &vk_compute_pipeline_layout_info, nullptr, &this->vk_compute_pipeline_layout), "Compute pipeline layout creation failed.", true  );
 
-	// ??. Create compute pipeline
+	// 8. Create compute pipeline
 	VkPipelineShaderStageCreateInfo const vk_shader_stage_info =
 	{
 		.sType               = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
@@ -274,7 +274,7 @@ GPUGramSchmidt::GPUGramSchmidt(bool const enable_debug)
 	};
 	VK_VALIDATE(  vkCreateComputePipelines(this->vk_device, VK_NULL_HANDLE, 1, &vk_compute_pipeline_info, nullptr, &this->vk_compute_pipeline), "Compute pipeline creation failed.", true  );
 	
-	// ??. Create command pool from where buffers will be allocated
+	// 9. Create command pool from where buffers will be allocated
 	VkCommandPoolCreateInfo const vk_command_pool_info =
 	{
 		.sType            = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
@@ -284,7 +284,7 @@ GPUGramSchmidt::GPUGramSchmidt(bool const enable_debug)
 	};
 	VK_VALIDATE(  vkCreateCommandPool(this->vk_device, &vk_command_pool_info, nullptr, &this->vk_command_pool), "Command pool creation failed.", true  );
 
-	// ??. Create command buffer
+	// 10. Create command buffer
 	VkCommandBufferAllocateInfo const vk_command_buffer_info =
 	{
 		.sType              = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
@@ -295,7 +295,7 @@ GPUGramSchmidt::GPUGramSchmidt(bool const enable_debug)
 	};
 	VK_VALIDATE(  vkAllocateCommandBuffers(this->vk_device, &vk_command_buffer_info, &this->vk_command_buffer), "Command buffer was not allocated.", true  );
 	
-	// ??. Unlock constructor mutex
+	// 11. Unlock constructor mutex
 	GPUGramSchmidt::constructor.unlock();
 }
 
@@ -328,29 +328,68 @@ GPUGramSchmidt::~GPUGramSchmidt(void)
 
 double GPUGramSchmidt::run(GPUGramSchmidt::Matrix &matrix)
 {
-	// ??. Allocate device memory for computations
-	//   ??.1. Find a suitable memory type
+	// 1. Create buffer for the matrix
+	//   1.1. Create handle for the storage buffer
+	VkBuffer vk_matrix_buffer;
+	VkBufferCreateInfo const vk_matrix_buffer_info =
+	{
+		.sType                 = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+		.pNext                 = nullptr,
+		.flags                 = 0,
+		.size                  = matrix.size() * matrix.size() * 8,
+		.usage                 = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+		.sharingMode           = VK_SHARING_MODE_EXCLUSIVE,
+		.queueFamilyIndexCount = 1,
+		.pQueueFamilyIndices   = &this->vk_selected_queue_family_i // ignored due to VK_SHARING_MODE_EXCLUSIVE
+	};
+	VK_VALIDATE(  vkCreateBuffer(this->vk_device, &vk_matrix_buffer_info, nullptr, &vk_matrix_buffer), "Matrix buffer creation failed.", false  );
+	//   1.2. Get the device memory requirements for the buffer
+	VkMemoryRequirements vk_matrix_buffer_memory_reqs;
+	vkGetBufferMemoryRequirements(this->vk_device, vk_matrix_buffer, &vk_matrix_buffer_memory_reqs);
+
+	// 2. Allocate device memory for computations
+	//   2.1. Find a suitable memory type
 	VkPhysicalDeviceMemoryProperties vk_device_memory_properties;
 	vkGetPhysicalDeviceMemoryProperties(this->vk_physical_device, &vk_device_memory_properties);
-	//   ??.2. Try to find memory type with needed properties and enough free space
-	VkDeviceMemory vk_device_memory;
+	//   2.2. Try to find memory type with needed properties and enough free space
+	VkDeviceMemory vk_matrix_memory;
+	bool allocation_success = false;
 	for (uint32_t memory_type_i = 0; memory_type_i < vk_device_memory_properties.memoryTypeCount; ++memory_type_i)
 	{
-		if ((vk_device_memory_properties.memoryTypes[memory_type_i].propertyFlags & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT == 0) ||
-		    (vk_device_memory_properties.memoryHeaps[vk_device_memory_properties.memoryTypes[memory_type_i].heapIndex].size < matrix.size() * matrix.size() * 8))
+		if (((vk_device_memory_properties.memoryTypes[memory_type_i].propertyFlags & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT) == 0) ||
+		    ((vk_device_memory_properties.memoryTypes[memory_type_i].propertyFlags & VK_MEMORY_PROPERTY_HOST_COHERENT_BIT) == 0) ||
+		    ((vk_device_memory_properties.memoryTypes[memory_type_i].propertyFlags & vk_matrix_buffer_memory_reqs.memoryTypeBits) == 0) ||
+		    (vk_device_memory_properties.memoryHeaps[vk_device_memory_properties.memoryTypes[memory_type_i].heapIndex].size < vk_matrix_buffer_memory_reqs.size))
 			continue;
 		VkMemoryAllocateInfo const vk_memory_info =
 		{
 			.sType           = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
 			.pNext           = nullptr,
-			.allocationSize  = matrix.size() * matrix.size() * 8,
+			.allocationSize  = vk_matrix_buffer_memory_reqs.size, // matrix.size() * matrix.size() * 8,
 			.memoryTypeIndex = memory_type_i
 		};
-		if (vkAllocateMemory(this->vk_device, &vk_memory_info, nullptr, &vk_device_memory) == VK_SUCCESS)
+		if (vkAllocateMemory(this->vk_device, &vk_memory_info, nullptr, &vk_matrix_memory) == VK_SUCCESS)
+		{
+			allocation_success = true;
 			break;
+		}
 	}
+	if (allocation_success == false)
+		throw std::runtime_error("Unable to allocate memory on your GPU.");
+	
+	// 3. Bind memory with the buffer
+	VK_VALIDATE(  vkBindBufferMemory(this->vk_device, vk_matrix_buffer, vk_matrix_memory, 0), "Device memory association with the matrix buffer failed.", false  );
 
-	vkFreeMemory(this->vk_device, vk_device_memory, nullptr);
+	// 4. Fill the buffer with the matrix data
+	double *payload = nullptr;
+	vkMapMemory(this->vk_device, vk_matrix_memory, 0, matrix.size() * matrix.size() * 8, 0, reinterpret_cast<void **>(&payload));
+	for (uint32_t i = 0; i < matrix.size(); ++i)
+		for (uint32_t j = 0; j < matrix.size(); ++j)
+			payload[i * matrix.size() + j] = matrix[i][j];
+	vkUnmapMemory(this->vk_device, vk_matrix_memory);
+
+	vkDestroyBuffer(this->vk_device, vk_matrix_buffer, nullptr);
+	vkFreeMemory(this->vk_device, vk_matrix_memory, nullptr);
 	
 	return 1.0;
 }
