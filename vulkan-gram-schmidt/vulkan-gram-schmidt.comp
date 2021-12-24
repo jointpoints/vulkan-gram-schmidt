@@ -34,24 +34,26 @@ void main(void)
 	uint curr_vec_i = gl_GlobalInvocationID.x + start_vec_i;
 	double dot_product = 0.0;
 
-	if (curr_vec_i < vector_count)
+	if (curr_vec_i == start_vec_i)
 	{
 		for (uint dim_i = 0; dim_i < dim; ++dim_i)
 			dot_product += matrix.data[VECTOR_INDEX(start_vec_i) + dim_i] * matrix.data[VECTOR_INDEX(curr_vec_i) + dim_i];
 
-		if (curr_vec_i == start_vec_i)
-		{
-			double norm = sqrt(dot_product);
-			for (uint dim_i = 0; dim_i < dim; ++dim_i)
-				matrix.data[VECTOR_INDEX(curr_vec_i) + dim_i] /= norm;
-		}
+		double norm = sqrt(dot_product);
+		for (uint dim_i = 0; dim_i < dim; ++dim_i)
+			matrix.data[VECTOR_INDEX(curr_vec_i) + dim_i] /= norm;
 	}
 	
 	barrier();
 	
 	if ((curr_vec_i < vector_count) && (curr_vec_i > start_vec_i))
+	{
+		for (uint dim_i = 0; dim_i < dim; ++dim_i)
+			dot_product += matrix.data[VECTOR_INDEX(start_vec_i) + dim_i] * matrix.data[VECTOR_INDEX(curr_vec_i) + dim_i];
+
 		for (uint dim_i = 0; dim_i < dim; ++dim_i)
 			matrix.data[VECTOR_INDEX(curr_vec_i) + dim_i] -= dot_product * matrix.data[VECTOR_INDEX(start_vec_i) + dim_i];
+	}
 }
 
 
