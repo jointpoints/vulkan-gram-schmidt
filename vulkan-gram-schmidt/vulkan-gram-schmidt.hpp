@@ -43,6 +43,8 @@ private:
 	VkPipeline            vk_compute_pipeline;
 	VkCommandPool         vk_command_pool;
 	VkCommandBuffer       vk_command_buffer;
+	VkDescriptorPool      vk_descriptor_pool;
+	VkDescriptorSet       vk_descriptor_set_0;
 
 	uint32_t vk_selected_gpu_i;
 	uint32_t vk_selected_queue_family_i;

@@ -222,7 +222,7 @@ GPUGramSchmidt::GPUGramSchmidt(bool const enable_debug)
 		.pImmutableSamplers = nullptr
 	};
 	//   7.2. Create descriptor set layout
-	VkDescriptorSetLayoutCreateInfo const vk_descriptor_set_0_info =
+	VkDescriptorSetLayoutCreateInfo const vk_descriptor_set_0_layout_info =
 	{
 		.sType        = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
 		.pNext        = nullptr,
@@ -230,13 +230,13 @@ GPUGramSchmidt::GPUGramSchmidt(bool const enable_debug)
 		.bindingCount = 1,
 		.pBindings    = &vk_descriptor_set_0_binding_0
 	};
-	VK_VALIDATE(  vkCreateDescriptorSetLayout(this->vk_device, &vk_descriptor_set_0_info, nullptr, &this->vk_descriptor_set_0_layout), "Descriptor set 0 layout creation failed.", true  );
+	VK_VALIDATE(  vkCreateDescriptorSetLayout(this->vk_device, &vk_descriptor_set_0_layout_info, nullptr, &this->vk_descriptor_set_0_layout), "Descriptor set 0 layout creation failed.", true  );
 	//   7.3. Describe push constants ranges (dim, vector_count, start_dim_i)
 	VkPushConstantRange const vk_push_constant_range =
 	{
 		.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT,
 		.offset     = 0,
-		.size       = 4 * 3
+		.size       = 4 * 3 // 3 integer numbers, 4 bytes each
 	};
 	//   7.4. Specify layout for the compute pipeline
 	VkPipelineLayoutCreateInfo const vk_compute_pipeline_layout_info =
@@ -284,7 +284,7 @@ GPUGramSchmidt::GPUGramSchmidt(bool const enable_debug)
 	};
 	VK_VALIDATE(  vkCreateCommandPool(this->vk_device, &vk_command_pool_info, nullptr, &this->vk_command_pool), "Command pool creation failed.", true  );
 
-	// 10. Create command buffer
+	// 10. Create a command buffer
 	VkCommandBufferAllocateInfo const vk_command_buffer_info =
 	{
 		.sType              = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
@@ -295,7 +295,35 @@ GPUGramSchmidt::GPUGramSchmidt(bool const enable_debug)
 	};
 	VK_VALIDATE(  vkAllocateCommandBuffers(this->vk_device, &vk_command_buffer_info, &this->vk_command_buffer), "Command buffer was not allocated.", true  );
 	
-	// 11. Unlock constructor mutex
+	// 11. Create descriptor pool from where descriptor sets will be allocated
+	VkDescriptorPoolSize const vk_descriptor_pool_size_storage_buffers =
+	{
+		.type            = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+		.descriptorCount = 1
+	};
+	VkDescriptorPoolCreateInfo const vk_descriptor_pool_info =
+	{
+		.sType         = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
+		.pNext         = nullptr,
+		.flags         = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT,
+		.maxSets       = 1,
+		.poolSizeCount = 1,
+		.pPoolSizes    = &vk_descriptor_pool_size_storage_buffers
+	};
+	VK_VALIDATE(  vkCreateDescriptorPool(this->vk_device, &vk_descriptor_pool_info, nullptr, &this->vk_descriptor_pool), "Descriptor pool creation failed.", true  );
+
+	// 12. Create a descriptor set (set = 0, binding = 0)
+	VkDescriptorSetAllocateInfo const vk_descriptor_set_0_info =
+	{
+		.sType              = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
+		.pNext              = nullptr,
+		.descriptorPool     = this->vk_descriptor_pool,
+		.descriptorSetCount = 1,
+		.pSetLayouts        = &vk_descriptor_set_0_layout
+	};
+	VK_VALIDATE(  vkAllocateDescriptorSets(this->vk_device, &vk_descriptor_set_0_info, &this->vk_descriptor_set_0), "Descriptor set 0 allocation failed.", true  );
+
+	// 13. Unlock constructor mutex
 	GPUGramSchmidt::constructor.unlock();
 }
 
@@ -306,6 +334,8 @@ GPUGramSchmidt::GPUGramSchmidt(bool const enable_debug)
 GPUGramSchmidt::~GPUGramSchmidt(void)
 {
 	GPUGramSchmidt::vk_busy_queues[std::make_pair(this->vk_selected_gpu_i, this->vk_selected_queue_family_i)] -= this->vk_selected_queues_count;
+	vkFreeDescriptorSets(this->vk_device, this->vk_descriptor_pool, 1, &this->vk_descriptor_set_0);
+	vkDestroyDescriptorPool(this->vk_device, this->vk_descriptor_pool, nullptr);
 	vkFreeCommandBuffers(this->vk_device, this->vk_command_pool, 1, &this->vk_command_buffer);
 	vkDestroyCommandPool(this->vk_device, this->vk_command_pool, nullptr);
 	vkDestroyPipeline(this->vk_device, this->vk_compute_pipeline, nullptr);
@@ -387,6 +417,49 @@ double GPUGramSchmidt::run(GPUGramSchmidt::Matrix &matrix)
 		for (uint32_t j = 0; j < matrix.size(); ++j)
 			payload[i * matrix.size() + j] = matrix[i][j];
 	vkUnmapMemory(this->vk_device, vk_matrix_memory);
+
+	// 5. Associate the buffer with the descriptor set binding
+	VkDescriptorBufferInfo const vk_matrix_buffer_descriptor_info =
+	{
+		.buffer = vk_matrix_buffer,
+		.offset = 0,
+		.range  = VK_WHOLE_SIZE
+	};
+	VkWriteDescriptorSet const vk_write_descriptor_set_0 =
+	{
+		.sType            = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+		.pNext            = nullptr,
+		.dstSet           = this->vk_descriptor_set_0,
+		.dstBinding       = 0,
+		.dstArrayElement  = 0,
+		.descriptorCount  = 1,
+		.descriptorType   = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+		.pImageInfo       = nullptr,
+		.pBufferInfo      = &vk_matrix_buffer_descriptor_info,
+		.pTexelBufferView = nullptr
+	};
+	vkUpdateDescriptorSets(this->vk_device, 1, &vk_write_descriptor_set_0, 0, nullptr);
+
+	// ??. Record commands into the command buffer
+	//   ??.1. Start buffer recording
+	VkCommandBufferBeginInfo const vk_command_buffer_begin_info =
+	{
+		.sType            = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+		.pNext            = nullptr,
+		.flags            = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
+		.pInheritanceInfo = nullptr // ignored for the primary buffers
+	};
+	VK_VALIDATE(  vkBeginCommandBuffer(this->vk_command_buffer, &vk_command_buffer_begin_info), "Command buffer recording failed to start.", false  );
+	//   ??.2. Bind the compute pipeline with the buffer
+	vkCmdBindPipeline(this->vk_command_buffer, VK_PIPELINE_BIND_POINT_COMPUTE, this->vk_compute_pipeline);
+	//   ??.3. Bind the descriptor set with the buffer
+	vkCmdBindDescriptorSets(this->vk_command_buffer, VK_PIPELINE_BIND_POINT_COMPUTE, this->vk_compute_pipeline_layout, 0, 1, &this->vk_descriptor_set_0, 0, nullptr);
+	//   ??.4. Push constants
+	uint32_t push_constants[] = {2, 2, 0};
+	vkCmdPushConstants(this->vk_command_buffer, this->vk_compute_pipeline_layout, VK_SHADER_STAGE_COMPUTE_BIT, 0, 4 * 3, push_constants);
+	vkCmdDispatch(this->vk_command_buffer, 1, 0, 0);
+	//   ??.5. Finish buffer recording
+	VK_VALIDATE(  vkEndCommandBuffer(this->vk_command_buffer), "Command buffer recording failed to end.", false  );
 
 	vkDestroyBuffer(this->vk_device, vk_matrix_buffer, nullptr);
 	vkFreeMemory(this->vk_device, vk_matrix_memory, nullptr);
