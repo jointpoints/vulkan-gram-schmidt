@@ -323,7 +323,16 @@ GPUGramSchmidt::GPUGramSchmidt(bool const enable_debug)
 	};
 	VK_VALIDATE(  vkAllocateDescriptorSets(this->vk_device, &vk_descriptor_set_0_info, &this->vk_descriptor_set_0), "Descriptor set 0 allocation failed.", true  );
 
-	// 13. Unlock constructor mutex
+	// 13. Create a fence to signal after each workload
+	VkFenceCreateInfo const vk_fence_info =
+	{
+		.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO,
+		.pNext = nullptr,
+		.flags = 0
+	};
+	VK_VALIDATE(  vkCreateFence(this->vk_device, &vk_fence_info, nullptr, &this->vk_fence), "Fence creation failed.", true  );
+
+	// 14. Unlock constructor mutex
 	GPUGramSchmidt::constructor.unlock();
 }
 
@@ -334,6 +343,7 @@ GPUGramSchmidt::GPUGramSchmidt(bool const enable_debug)
 GPUGramSchmidt::~GPUGramSchmidt(void)
 {
 	GPUGramSchmidt::vk_busy_queues[std::make_pair(this->vk_selected_gpu_i, this->vk_selected_queue_family_i)] -= this->vk_selected_queues_count;
+	vkDestroyFence(this->vk_device, this->vk_fence, nullptr);
 	vkFreeDescriptorSets(this->vk_device, this->vk_descriptor_pool, 1, &this->vk_descriptor_set_0);
 	vkDestroyDescriptorPool(this->vk_device, this->vk_descriptor_pool, nullptr);
 	vkFreeCommandBuffers(this->vk_device, this->vk_command_pool, 1, &this->vk_command_buffer);
@@ -356,7 +366,7 @@ GPUGramSchmidt::~GPUGramSchmidt(void)
 
 
 
-double GPUGramSchmidt::run(GPUGramSchmidt::Matrix &matrix)
+void GPUGramSchmidt::run(GPUGramSchmidt::Matrix &matrix, bool const vectors_as_columns)
 {
 	// 1. Create buffer for the matrix
 	//   1.1. Create handle for the storage buffer
@@ -415,7 +425,7 @@ double GPUGramSchmidt::run(GPUGramSchmidt::Matrix &matrix)
 	vkMapMemory(this->vk_device, vk_matrix_memory, 0, matrix.size() * matrix.size() * 8, 0, reinterpret_cast<void **>(&payload));
 	for (uint32_t i = 0; i < matrix.size(); ++i)
 		for (uint32_t j = 0; j < matrix.size(); ++j)
-			payload[i * matrix.size() + j] = matrix[i][j];
+			payload[i * matrix.size() + j] = vectors_as_columns ? matrix[j][i] : matrix[i][j];
 	vkUnmapMemory(this->vk_device, vk_matrix_memory);
 
 	// 5. Associate the buffer with the descriptor set binding
@@ -440,8 +450,8 @@ double GPUGramSchmidt::run(GPUGramSchmidt::Matrix &matrix)
 	};
 	vkUpdateDescriptorSets(this->vk_device, 1, &vk_write_descriptor_set_0, 0, nullptr);
 
-	// ??. Record commands into the command buffer
-	//   ??.1. Start buffer recording
+	// 6. Record and submit commands into the command buffer
+	//   6.1. Start buffer recording
 	VkCommandBufferBeginInfo const vk_command_buffer_begin_info =
 	{
 		.sType            = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
@@ -449,20 +459,49 @@ double GPUGramSchmidt::run(GPUGramSchmidt::Matrix &matrix)
 		.flags            = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
 		.pInheritanceInfo = nullptr // ignored for the primary buffers
 	};
-	VK_VALIDATE(  vkBeginCommandBuffer(this->vk_command_buffer, &vk_command_buffer_begin_info), "Command buffer recording failed to start.", false  );
-	//   ??.2. Bind the compute pipeline with the buffer
-	vkCmdBindPipeline(this->vk_command_buffer, VK_PIPELINE_BIND_POINT_COMPUTE, this->vk_compute_pipeline);
-	//   ??.3. Bind the descriptor set with the buffer
-	vkCmdBindDescriptorSets(this->vk_command_buffer, VK_PIPELINE_BIND_POINT_COMPUTE, this->vk_compute_pipeline_layout, 0, 1, &this->vk_descriptor_set_0, 0, nullptr);
-	//   ??.4. Push constants
-	uint32_t push_constants[] = {2, 2, 0};
-	vkCmdPushConstants(this->vk_command_buffer, this->vk_compute_pipeline_layout, VK_SHADER_STAGE_COMPUTE_BIT, 0, 4 * 3, push_constants);
-	vkCmdDispatch(this->vk_command_buffer, 1, 0, 0);
-	//   ??.5. Finish buffer recording
-	VK_VALIDATE(  vkEndCommandBuffer(this->vk_command_buffer), "Command buffer recording failed to end.", false  );
+	VkSubmitInfo const vk_submit_info =
+	{
+		.sType                = VK_STRUCTURE_TYPE_SUBMIT_INFO,
+		.pNext                = nullptr,
+		.waitSemaphoreCount   = 0,
+		.pWaitSemaphores      = nullptr,
+		.pWaitDstStageMask    = nullptr,
+		.commandBufferCount   = 1,
+		.pCommandBuffers      = &this->vk_command_buffer,
+		.signalSemaphoreCount = 0,
+		.pSignalSemaphores    = nullptr
+	};
+	uint32_t push_constants[] = {(uint32_t)matrix.size(), (uint32_t)matrix.size(), 0};
+	for (uint32_t start_vec_i = 0; start_vec_i < matrix.size(); ++start_vec_i)
+	{
+		VK_VALIDATE(  vkBeginCommandBuffer(this->vk_command_buffer, &vk_command_buffer_begin_info), "Command buffer recording failed to start.", false  );
+		//   6.2. Bind the compute pipeline with the buffer
+		vkCmdBindPipeline(this->vk_command_buffer, VK_PIPELINE_BIND_POINT_COMPUTE, this->vk_compute_pipeline);
+		//   6.3. Bind the descriptor set with the buffer
+		vkCmdBindDescriptorSets(this->vk_command_buffer, VK_PIPELINE_BIND_POINT_COMPUTE, this->vk_compute_pipeline_layout, 0, 1, &this->vk_descriptor_set_0, 0, nullptr);
+		//   6.4. Push constants
+		push_constants[2] = start_vec_i;
+		vkCmdPushConstants(this->vk_command_buffer, this->vk_compute_pipeline_layout, VK_SHADER_STAGE_COMPUTE_BIT, 0, 4 * 3, push_constants);
+		vkCmdDispatch(this->vk_command_buffer, (matrix.size() - start_vec_i) / 32 + ((matrix.size() - start_vec_i) % 32 > 0), 1, 1);
+		//   6.5. Finish buffer recording
+		VK_VALIDATE(  vkEndCommandBuffer(this->vk_command_buffer), "Command buffer recording failed to end.", false  );
+		//   6.6. Submit the command buffer to the GPU queue
+		VK_VALIDATE(  vkQueueSubmit(this->vk_queues[0], 1, &vk_submit_info, this->vk_fence), "Queue submission failed.", false  );
+		//   6.7. Wait for the fence before continuing execution
+		VK_VALIDATE(  vkWaitForFences(this->vk_device, 1, &this->vk_fence, VK_TRUE, 10000000), "Waiting for the fence failed.", false  );
+		VK_VALIDATE(  vkResetFences(this->vk_device, 1, &this->vk_fence), "Fence reset failed.", false  );
+	}
+
+	// 7. Read the result into the original matrix
+	//double *result = nullptr;
+	VK_VALIDATE(  vkMapMemory(this->vk_device, vk_matrix_memory, 0, matrix.size() * matrix.size() * 8, 0, reinterpret_cast<void **>(&payload)), "Memory mapping after calculations failed.", false  );
+	for (uint32_t i = 0; i < matrix.size(); ++i)
+		for (uint32_t j = 0; j < matrix.size(); ++j)
+			matrix[vectors_as_columns ? j : i][vectors_as_columns? i : j] = payload[i * matrix.size() + j];
+	vkUnmapMemory(this->vk_device, vk_matrix_memory);
 
 	vkDestroyBuffer(this->vk_device, vk_matrix_buffer, nullptr);
 	vkFreeMemory(this->vk_device, vk_matrix_memory, nullptr);
 	
-	return 1.0;
+	return;
 }

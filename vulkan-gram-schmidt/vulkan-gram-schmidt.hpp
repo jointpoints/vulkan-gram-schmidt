@@ -45,6 +45,7 @@ private:
 	VkCommandBuffer       vk_command_buffer;
 	VkDescriptorPool      vk_descriptor_pool;
 	VkDescriptorSet       vk_descriptor_set_0;
+	VkFence               vk_fence;
 
 	uint32_t vk_selected_gpu_i;
 	uint32_t vk_selected_queue_family_i;
@@ -89,7 +90,7 @@ public:
 	/// @name Computations
 	/// @{
 	
-	double run(GPUGramSchmidt::Matrix &matrix);
+	void run(GPUGramSchmidt::Matrix &matrix, bool const vectors_as_columns=false);
 
 	/// @}
 

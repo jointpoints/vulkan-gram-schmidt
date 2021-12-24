@@ -31,19 +31,27 @@ layout(push_constant) uniform metadata
 
 void main(void)
 {
-	uint curr_vec_i = gl_GlobalInvocationID.x;
-
-	if ((curr_vec_i < start_vec_i) || (curr_vec_i >= vector_count))
-		return;
-
+	uint curr_vec_i = gl_GlobalInvocationID.x + start_vec_i;
 	double dot_product = 0.0;
-	for (uint dim_i = 0; dim_i < dim; ++dim_i)
-		dot_product += matrix.data[VECTOR_INDEX(start_vec_i) + dim_i] * matrix.data[VECTOR_INDEX(curr_vec_i) + dim_i];
-	
-	for (uint dim_i = 0; dim_i < dim; ++dim_i)
-		matrix.data[VECTOR_INDEX(curr_vec_i) + dim_i] -= dot_product * matrix.data[VECTOR_INDEX(start_vec_i) + dim_i];
 
-	return;
+	if (curr_vec_i < vector_count)
+	{
+		for (uint dim_i = 0; dim_i < dim; ++dim_i)
+			dot_product += matrix.data[VECTOR_INDEX(start_vec_i) + dim_i] * matrix.data[VECTOR_INDEX(curr_vec_i) + dim_i];
+
+		if (curr_vec_i == start_vec_i)
+		{
+			double norm = sqrt(dot_product);
+			for (uint dim_i = 0; dim_i < dim; ++dim_i)
+				matrix.data[VECTOR_INDEX(curr_vec_i) + dim_i] /= norm;
+		}
+	}
+	
+	barrier();
+	
+	if ((curr_vec_i < vector_count) && (curr_vec_i > start_vec_i))
+		for (uint dim_i = 0; dim_i < dim; ++dim_i)
+			matrix.data[VECTOR_INDEX(curr_vec_i) + dim_i] -= dot_product * matrix.data[VECTOR_INDEX(start_vec_i) + dim_i];
 }
 
 

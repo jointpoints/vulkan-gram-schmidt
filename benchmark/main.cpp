@@ -4,6 +4,7 @@
  */
 #include "../vulkan-gram-schmidt/vulkan-gram-schmidt.hpp"
 #include <exception>
+#include <chrono>
 #include <iostream>
 
 
@@ -17,7 +18,13 @@ int main(void)
 		GPUGramSchmidt::shader_folder = "../vulkan-gram-schmidt";
 		GPUGramSchmidt vgs(true);
 		GPUGramSchmidt::Matrix matrix{{1, 2}, {3, 4}};
-		std::cout << vgs.run(matrix) << "\n";
+		vgs.run(matrix);
+		for (auto &row : matrix)
+		{
+			for (auto &elem : row)
+				std::cout << elem << '\t';
+			std::cout << '\n';
+		}
 	}
 	catch (std::exception &error)
 	{
