@@ -493,7 +493,6 @@ void GPUGramSchmidt::run(GPUGramSchmidt::Matrix &matrix, bool const vectors_as_c
 	}
 
 	// 7. Read the result into the original matrix
-	//double *result = nullptr;
 	VK_VALIDATE(  vkMapMemory(this->vk_device, vk_matrix_memory, 0, matrix.size() * matrix.size() * 8, 0, reinterpret_cast<void **>(&payload)), "Memory mapping after calculations failed.", false  );
 	for (uint32_t i = 0; i < matrix.size(); ++i)
 		for (uint32_t j = 0; j < matrix.size(); ++j)
