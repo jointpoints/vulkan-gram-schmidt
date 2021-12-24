@@ -1,5 +1,5 @@
 /**
- * @file common.hpp
+ * @file vulkan-gram-schmidt.hpp
  * @author JointPoints, 2021, github.com/jointpoints
  */
 #ifndef __VGS_COMMON_HPP__
