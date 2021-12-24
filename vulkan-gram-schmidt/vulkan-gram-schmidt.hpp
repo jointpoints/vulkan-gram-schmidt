@@ -22,9 +22,18 @@
  * @class GPUGramSchmidt
  * @brief Tools to execute Gram-Schmidt process on GPU.
  *
- * This class provides interface for calculation of orthonormal or orthogonal basis
+ * This class provides interface for calculation of orthonormal basis
  * on GPU given the initial set of \f$n\f$ linearly independent vectors from \f$\mathbb{R}^n\f$.
- * Vulkan 1.2 support is required.
+ * 
+ * The following requirements are needed to be explicitly satisfied by the end user:
+ * * GPU is requitred to be able to perform compute operations.
+ * * GPU is required to have a host coherent part of memory.
+ * * Vulkan 1.2 (or newer) is required to be supported by the GPU driver.
+ * * Matrices passed to the GPUGramSchmidt::run function are required to be non-singular; otherwise,
+ *   no guarantees are given about the behaviour of the program.
+ * 
+ * Instances of this class are generally expected to be thread-secure, however, this was not
+ * heavily tested.
  */
 class GPUGramSchmidt final
 {
@@ -75,12 +84,22 @@ public:
 	/// @{
 
 	/**
-	 * @brief Creates new wrapper interface
+	 * @brief Creates a new solver
 	 *
-	 * Load jobs to this object after its creation.
+	 * Sets up a Vulkan communication environment with the GPU.
+	 * 
+	 * @param enable_debug Send Vulkan debug information to the output.
+	 * 
+	 * @warning `enable_debug = true` will require the presence of the @c VK_LAYER_KHRONOS_validation
+	 * Vulkan layer and the @c VK_EXT_debug_utils Vulkan extension.
 	 */
 	GPUGramSchmidt(bool const enable_debug = false);
 
+	/**
+	 * @brief Destroys the solver
+	 *
+	 * Destructs the communication environment with the GPU.
+	 */
 	~GPUGramSchmidt(void);
 
 	/// @}
@@ -90,6 +109,21 @@ public:
 	/// @name Computations
 	/// @{
 	
+	/**
+	 * @brief Run Gram-Schmidt process on GPU
+	 *
+	 * Perform orthonormalisation of vectors with the help of GPU.
+	 * 
+	 * @param matrix Square matrix with the coordinates of the original vectors.
+	 * @param vectors_as_columns Indicates whether vectors are packed into @c matrix
+	 *                           as columns or as rows.
+	 * 
+	 * @warning Keep in mind, that the non-singularity of @c matrix must be guaranteed
+	 * by you.
+	 * 
+	 * @return Nothing; the answer is written directly into @c matrix. If `vectors_as_columns == true`,
+	 * the answer will also be written in columns.
+	 */
 	void run(GPUGramSchmidt::Matrix &matrix, bool const vectors_as_columns=false);
 
 	/// @}
